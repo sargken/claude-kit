@@ -4,6 +4,8 @@ export type PlannedTask = {
   title: string
   tier: string
   after: number[]
+  /** Accepted in an earlier session: shown under Finished when no run of this session matches. */
+  done?: boolean
 }
 
 export type Flow = {

@@ -23,6 +23,8 @@ If the tool `mcp__savvy-progress__progress` appears among your tools, including 
 - if re-planning changes the tasks: the new `tasks` and `total`;
 - once at close: `finished: true`.
 
+When you re-post the plan after a restart, pass every task again in `tasks`, mark the ones already accepted with `done: true` (the panel's state is per session, so they have no run to match), and still pass `total` and `done`.
+
 When delegating, pass the task's `title` verbatim as the Agent tool's `description` (a return round reuses it too): the agents panel matches runs to planned tasks by it.
 
 ## 1. Understand and plan (orchestrator only)

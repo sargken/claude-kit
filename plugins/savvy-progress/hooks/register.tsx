@@ -37,7 +37,7 @@ type ProgressInput = {
   done?: number
   phase?: Phase
   finished?: boolean
-  tasks?: { title?: string; tier?: string; after?: number[] }[]
+  tasks?: { title?: string; tier?: string; after?: number[]; done?: boolean }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +196,8 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
       title: (t.title ?? '').trim(),
       tier: tierName(t.tier ?? ''),
       after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0).slice(0, MAX_AFTER),
+      // Strictly a boolean: anything else the schema does not allow counts as not done.
+      done: t.done === true,
     }))
 
 const merge = (prev: Flow | null, input: ProgressInput): Flow => {
@@ -472,11 +474,18 @@ const elapsed = (a: AgentRun, at: number): number => (a.endedAt ?? Math.max(at, 
 
 type Planned = PlannedTask & { n: number }
 
-const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => {
+// The flow's tasks that no run of this session matches, numbered in plan order.
+const unmatchedOf = (f: Flow | null, list: AgentRun[]): Planned[] => {
   if (!f || f.isFinished) return []
   const started = new Set(list.map(a => norm(a.description)))
   return (f.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter(t => !started.has(norm(t.title)))
 }
+
+const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => unmatchedOf(f, list).filter(t => t.done !== true)
+
+// Tasks accepted in an earlier session: the panel's state is per session, so they
+// have no run here and are shown under Finished from the plan alone.
+const earlierDoneOf = (f: Flow | null, list: AgentRun[]): Planned[] => unmatchedOf(f, list).filter(t => t.done === true)
 
 const totals = (list: AgentRun[], at: number) => {
   const cost = list.reduce((s, a) => s + a.costUsd, 0)
@@ -724,27 +733,29 @@ ${statusMark(mx(W, W - 8), 16, a.status, color)}
   )
 }
 
-const plannedSvg = (W: number, p: Planned): string => {
+// A planned task's row; `isDone` draws a task accepted in an earlier session: the done check, no "after".
+const plannedSvg = (W: number, p: Planned, isDone = false): string => {
   const tier = p.tier in TIER_COLOR ? p.tier : 'other'
   const color = colorOf(tier)
   const textW = W - 42 - 22
   const meta = [tierModel(tier)]
-  if (p.after.length) meta.push(`${tr().after} ${p.after.join(', ')}`)
+  if (p.after.length && !isDone) meta.push(`${tr().after} ${p.after.join(', ')}`)
   return svg(
     W,
     46,
     `${rowCrab(W, 0, 6, tier, true)}
 <text class="s" ${startText(W, 42, 18)} font-family="${FONT}" font-size="13" font-weight="600">${xml(fitText(`${p.n}. ${p.title}`, 13, textW))}</text>
 <text ${startText(W, 42, 34)} font-family="${FONT}" font-size="11"><tspan fill="${color}">${xml(tierWord(tier))}</tspan><tspan class="m">  ${xml(meta.filter(Boolean).join('  ·  '))}</tspan></text>
-${statusMark(mx(W, W - 8), 16, 'planned', color)}
+${statusMark(mx(W, W - 8), 16, isDone ? 'done' : 'planned', color)}
 <line class="ln" x1="0" y1="45.5" x2="${W}" y2="45.5"/>`,
   )
 }
 
-const compactSvg = (W: number, list: AgentRun[], planned: Planned[], t: ReturnType<typeof totals>): string => {
+const compactSvg = (W: number, list: AgentRun[], planned: Planned[], t: ReturnType<typeof totals>, earlier: Planned[] = []): string => {
   const icons = [
     ...list.filter(a => a.status === 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: 'running', dim: false })),
     ...list.filter(a => a.status !== 'running').map(a => ({ k: costumeOf(a.type), c: colorOf(tierOf(a.type)), s: a.status, dim: false })),
+    ...earlier.map(d => ({ k: d.tier in TIER_COLOR ? d.tier : 'other', c: colorOf(d.tier), s: 'done', dim: false })),
     ...planned.map(p => ({ k: p.tier in TIER_COLOR ? p.tier : 'other', c: colorOf(p.tier), s: 'planned', dim: true })),
   ]
   const fit = Math.max(1, Math.floor((W - 150) / 36))
@@ -820,6 +831,10 @@ export const register: Register = (on, options) => {
                 title: { type: 'string', description: 'A few words; reused verbatim as the Agent description.' },
                 tier: { type: 'string', enum: [...TIERS] },
                 after: { type: 'array', items: { type: 'integer' }, description: 'Numbers of the tasks this one waits for.' },
+                done: {
+                  type: 'boolean',
+                  description: 'True for a task already accepted in an earlier session: it shows under Finished without an agent run.',
+                },
               },
               required: ['title', 'tier'],
             },
@@ -1040,6 +1055,9 @@ export const register: Register = (on, options) => {
     const running = list.filter(a => a.status === 'running').reverse()
     const finished = list.filter(a => a.status !== 'running').reverse()
     const planned = plannedOf(f, list)
+    const earlier = earlierDoneOf(f, list)
+    // The Finished group: this session's finished runs, then the tasks accepted earlier.
+    const finishedCount = finished.length + earlier.length
     const t = totals(list, at)
     // The pane's title says "Agents"; inside, only the flow's own name.
     const title = f && !f.isFinished ? f.title : ''
@@ -1055,12 +1073,12 @@ export const register: Register = (on, options) => {
     const toggleDone = (
       <Button
         key="done"
-        label={`${p.isDoneCollapsed ? (isRtl() ? '◂' : '▸') : '▾'} ${s.finished} · ${finished.length}`}
+        label={`${p.isDoneCollapsed ? (isRtl() ? '◂' : '▸') : '▾'} ${s.finished} · ${finishedCount}`}
         plain
         onPress={() => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))}
       />
     )
-    const isEmpty = list.length === 0 && planned.length === 0
+    const isEmpty = list.length === 0 && planned.length === 0 && earlier.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
 
     if (e.surface === 'desktop' && 'Svg' in ui) {
@@ -1077,14 +1095,15 @@ export const register: Register = (on, options) => {
       if (p.isCompact) {
         return (
           <Box flexDirection="column" gap={1} alignItems={align}>
-            <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
+            <Svg source={compactSvg(W, list, planned, t, earlier)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
             {toggleCompact}
           </Box>
         )
       }
       const shownDone = p.isDoneCollapsed ? 0 : finished.length
-      const lines = 1 + (isEmpty ? 1 : 0) + (running.length > 0 ? 1 : 0) + (finished.length > 0 ? 1 : 0) + (planned.length > 0 ? 1 : 0)
-      const gridH = headerHeight(title) + lines * LINE_H + (running.length + shownDone) * 66 + planned.length * 46
+      const shownEarlier = p.isDoneCollapsed ? 0 : earlier.length
+      const lines = 1 + (isEmpty ? 1 : 0) + (running.length > 0 ? 1 : 0) + (finishedCount > 0 ? 1 : 0) + (planned.length > 0 ? 1 : 0)
+      const gridH = headerHeight(title) + lines * LINE_H + (running.length + shownDone) * 66 + (planned.length + shownEarlier) * 46
       return (
         <Box flexDirection="column">
           {/* The grid sizes the pane; the content is placed over it, as an
@@ -1100,10 +1119,14 @@ export const register: Register = (on, options) => {
             {running.map(a => (
               <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, ${s.isRunning}`} width={W} height={66} />
             ))}
-            {finished.length > 0 && toggleDone}
+            {finishedCount > 0 && toggleDone}
             {!p.isDoneCollapsed &&
               finished.map(a => (
                 <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, ${s.isFinished}`} width={W} height={66} />
+              ))}
+            {!p.isDoneCollapsed &&
+              earlier.map(d => (
+                <Svg key={`done-${d.n}`} source={plannedSvg(W, d, true)} alt={`${d.n}. ${d.title}: ${s.isFinished}`} width={W} height={46} />
               ))}
             {planned.length > 0 && section('h-plan', `${s.planned} · ${planned.length}`)}
             {planned.map(pl => (
@@ -1168,6 +1191,11 @@ export const register: Register = (on, options) => {
                 {STATUS_GLYPH[a.status]}{' '}
               </Text>
             ))}
+            {earlier.map(d => (
+              <Text key={`done-${d.n}`} color={colorOf(d.tier in TIER_COLOR ? d.tier : 'other')}>
+                {STATUS_GLYPH.done}{' '}
+              </Text>
+            ))}
             {planned.map(pl => (
               <Text key={`plan-${pl.n}`} dimColor>
                 ◷{' '}
@@ -1179,8 +1207,23 @@ export const register: Register = (on, options) => {
             {isEmpty && <Text dimColor>{s.empty}</Text>}
             {running.length > 0 && <Text dimColor>{s.running} · {running.length}</Text>}
             {running.map(row)}
-            {finished.length > 0 && toggleDone}
+            {finishedCount > 0 && toggleDone}
             {!p.isDoneCollapsed && finished.map(row)}
+            {!p.isDoneCollapsed &&
+              earlier.map(d => {
+                const tier = d.tier in TIER_COLOR ? d.tier : 'other'
+                return (
+                  <Box key={`done-${d.n}`} flexDirection="column" marginBottom={1}>
+                    <Text dimColor wrap="truncate-end">
+                      <Text color={colorOf(tier)}>▢</Text> {d.n}. {d.title} <Text color="green">{STATUS_GLYPH.done}</Text>
+                    </Text>
+                    <Text dimColor wrap="truncate-end">
+                      {'  '}
+                      {tierWord(tier)} · {tierModel(tier)}
+                    </Text>
+                  </Box>
+                )
+              })}
             {planned.length > 0 && <Text dimColor>{s.planned} · {planned.length}</Text>}
             {planned.map(pl => {
               const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
@@ -1214,7 +1257,7 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
-    const crew = list.length + plannedOf(f, list).length
+    const crew = list.length + plannedOf(f, list).length + earlierDoneOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
     const crewButton = (
       <Button key="savvy-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
