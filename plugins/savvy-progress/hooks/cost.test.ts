@@ -35,6 +35,8 @@ const shows = async ($: Engine, text: RegExp) => {
 // 1M input, 1M output, 2M cache read and 1M cache write costs input + output + 2 × read + write.
 const TURN: Usage = { input_tokens: 1e6, output_tokens: 1e6, cache_read_input_tokens: 2e6, cache_creation_input_tokens: 1e6 }
 const PRICED: readonly (readonly [model: string, shown: string])[] = [
+  ['claude-fable-5-2', '$64.4'], // 8 + 40 + 2 × 0.20 + 16
+  ['claude-mythos-5-2', '$64.4'],
   ['claude-fable-5-1', '$80.5'], // 10 + 50 + 2 × 0.25 + 20
   ['claude-fable-5', '$82.0'], // 10 + 50 + 2 × 1 + 20
   ['claude-opus-5-5', '$32.4'], // 4 + 20 + 2 × 0.20 + 8
