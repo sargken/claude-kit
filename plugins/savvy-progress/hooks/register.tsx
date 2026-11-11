@@ -372,7 +372,7 @@ const TIER_MODEL: Record<string, [model: string, effort: string]> = {
   heavy: ['Opus', 'xhigh'],
   careful: ['Opus', 'high'],
   medium: ['Opus', 'medium'],
-  light: ['Opus', 'low'],
+  light: ['Sonnet', 'medium'],
 }
 
 // "Opus · xhigh", with the effort word in the panel's language; '' for an unknown tier.

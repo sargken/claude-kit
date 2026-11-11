@@ -1,7 +1,6 @@
 ---
 name: savvy-flow
 description: Orchestrated delivery flow. The session model plans, owns design, delegates implementation to tiered worker subagents (savvy-fable / savvy-heavy / savvy-careful / savvy-medium / savvy-light) and adversarially reviews their output. Invoke with /savvy-flow <task>.
-disable-model-invocation: true
 argument-hint: <task description>
 ---
 
@@ -73,7 +72,7 @@ Pick the cheapest tier that will get the task right the first time. Two axes: **
 | Heavy | `savvy-heavy` | Opus / xhigh | "Understand and find": unfamiliar or messy code, unclear root cause, non-obvious architecture, large contexts, anything where a wrong first approach is expensive |
 | Careful | `savvy-careful` | Opus / high | "Do it right": the approach is clear but execution is delicate. Multi-file refactors, fixes that must preserve invariants, logic with many edge cases, concurrency |
 | Medium | `savvy-medium` | Opus / medium | Standard feature work, bug fixes with a known cause, changes confined to a few files with clear requirements |
-| Light | `savvy-light` | Opus / low | Mechanical edits, renames, boilerplate, config, small isolated fixes, running builds/tests and reporting |
+| Light | `savvy-light` | Sonnet / medium | Mechanical edits, renames, boilerplate, config, small isolated fixes, running builds/tests and reporting |
 
 Heuristics:
 - Uncertain between two tiers → take the higher one. Exception: Fable is a reserve tier; pick it only when the task clearly meets its criteria, otherwise Heavy.
